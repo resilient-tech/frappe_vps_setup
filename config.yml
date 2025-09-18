@@ -1,0 +1,33 @@
+# Frappe VPS Setup Configuration
+
+# Server Configuration (MANDATORY)
+server:
+  ip_address: "78.47.136.133"  # REQUIRED: IP address of your VPS server
+  timezone: "Asia/Kolkata"
+  swap_size: "2G"
+
+# User Configuration
+user:
+  username: "root"  # Default username (optional, defaults to root)
+  password: ""  # Will be generated if empty
+
+# Database Configuration
+database:
+  mariadb_version: "10.11"  # MariaDB version to install
+  root_password: ""  # Will be generated if empty
+
+# Frappe/ERPNext Configuration
+frappe:
+  username: "resilient"  # Default frappe system user (optional, defaults to resilient)
+  version: "develop"
+  bench_name: "resilient-bench"  # Name of the bench directory (optional, defaults to resilient-bench)
+
+  # "A" record to IP is expected to be present!!
+  site_name: "ratnaafin-demo.resilient.tech"
+  admin_password: ""  # Will be generated if empty
+  install_erpnext: true
+
+# SSL Configuration
+ssl:
+  enabled: true
+  email: "admin@yoursite.com"
