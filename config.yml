@@ -4,7 +4,7 @@
 server:
   ip_address: "78.47.136.133"  # REQUIRED: IP address of your VPS server
   timezone: "Asia/Kolkata"
-  swap_size: "2G"
+  swap_size: "2G"  # https://help.ubuntu.com/community/SwapFaq
 
 # User Configuration
 user:

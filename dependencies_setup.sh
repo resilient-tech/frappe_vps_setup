@@ -552,26 +552,17 @@ EOF
 install_frappe_bench() {
     print_info "Installing Frappe Bench..."
 
-    # Install frappe-bench for the frappe user
-    print_info "Installing frappe-bench for user: $FRAPPE_USERNAME"
+    # Install frappe-bench system-wide as root
+    print_info "Installing frappe-bench system-wide"
 
-    # Install frappe-bench using pip in user space (Ubuntu 24.04+ externally managed environment)
-    sudo -u "$FRAPPE_USERNAME" -H python -m pip install --user --break-system-packages frappe-bench
-
-    # Add ~/.local/bin to PATH if not already there
-    sudo -u "$FRAPPE_USERNAME" -H bash -c '
-        if ! echo "$PATH" | grep -q "$HOME/.local/bin"; then
-            echo "export PATH=\"\$HOME/.local/bin:\$PATH\"" >> ~/.bashrc
-            echo "Added ~/.local/bin to PATH in ~/.bashrc"
-        fi
-    '
+    # Install frappe-bench using pip as root (Ubuntu 24.04+ externally managed environment)
+    sudo python -m pip install --break-system-packages frappe-bench
 
     # Verify installation
     echo "=== Verifying Frappe Bench installation ==="
-    if sudo -u "$FRAPPE_USERNAME" -H bash -c 'export PATH="$HOME/.local/bin:$PATH"; command -v bench' >/dev/null 2>&1; then
-        bench_version=$(sudo -u "$FRAPPE_USERNAME" -H bash -c 'export PATH="$HOME/.local/bin:$PATH"; bench --version')
-        echo "✓ Frappe Bench installed: $bench_version"
-        echo "✓ Installed for user: $FRAPPE_USERNAME"
+    if command -v bench >/dev/null 2>&1; then
+        bench_version=$(bench --version)
+        echo "✓ Frappe Bench installed system-wide: $bench_version"
     else
         echo "❌ Frappe Bench installation failed"
         exit 1
@@ -616,7 +607,7 @@ main() {
     print_info "  ✓ Yarn package manager (for $FRAPPE_USERNAME)"
     print_info "  ✓ MariaDB $MARIADB_VERSION"
     print_info "  ✓ MariaDB secured and optimized for Frappe"
-    print_info "  ✓ Frappe Bench (installed for $FRAPPE_USERNAME)"
+    print_info "  ✓ Frappe Bench (installed system-wide)"
     print_info ""
     print_info "📋 Important files:"
     print_info "  - MariaDB root password: /home/$FRAPPE_USERNAME/mariadb_root_password.txt"
