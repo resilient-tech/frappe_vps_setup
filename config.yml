@@ -4,7 +4,7 @@
 server:
   ip_address: "78.47.136.133"  # REQUIRED: IP address of your VPS server
   timezone: "Asia/Kolkata"
-  swap_size: "2G"  # https://help.ubuntu.com/community/SwapFaq
+  swap_size: "3G"  # https://help.ubuntu.com/community/SwapFaq
 
 # User Configuration
 user:
@@ -20,14 +20,14 @@ database:
 frappe:
   username: "resilient"  # Default frappe system user (optional, defaults to resilient)
   version: "develop"
-  bench_name: "resilient-bench"  # Name of the bench directory (optional, defaults to resilient-bench)
+  bench_name: "gurjar-bench"  # Name of the bench directory (optional, defaults to resilient-bench)
 
   # "A" record to IP is expected to be present!!
-  site_name: "ratnaafin-demo.resilient.tech"
+  site_name: "gurjar.resilient.tech"
   admin_password: ""  # Will be generated if empty
-  install_erpnext: true
+  install_erpnext: false
 
 # SSL Configuration
 ssl:
   enabled: true
-  email: "admin@yoursite.com"
+  email: "admin@resilient.tech"
