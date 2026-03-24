@@ -170,7 +170,7 @@ test_ssh_connection() {
 
     if [[ "$USE_ROOT_PASSWORD" == "true" ]]; then
         # Use sshpass for password authentication
-        if ! sshpass -p "$ROOT_PASSWORD" ssh $SSH_OPTS -o BatchMode=no "$USER_USERNAME@$SERVER_IP" "echo 'SSH connection successful'" 2>/dev/null; then
+        if ! SSHPASS="$ROOT_PASSWORD" sshpass -e ssh $SSH_OPTS -o BatchMode=no "$USER_USERNAME@$SERVER_IP" "echo 'SSH connection successful'" 2>/dev/null; then
             print_error "Failed to connect to $USER_USERNAME@$SERVER_IP using password"
             print_error "Please ensure:"
             print_error "  1. The server is running and accessible"
@@ -205,7 +205,7 @@ setup_server() {
 
         # First, add SSH key to root's authorized_keys so subsequent connections can use keys
         print_info "Adding SSH public key to root's authorized_keys..."
-        sshpass -p "$ROOT_PASSWORD" ssh $SSH_OPTS -o BatchMode=no "$USER_USERNAME@$SERVER_IP" /bin/bash << EOF
+        SSHPASS="$ROOT_PASSWORD" sshpass -e ssh $SSH_OPTS -o BatchMode=no "$USER_USERNAME@$SERVER_IP" /bin/bash << EOF
 set -euo pipefail
 mkdir -p ~/.ssh
 chmod 700 ~/.ssh
