@@ -93,7 +93,7 @@ install_essential_packages() {
     print_info "Installing essential packages..."
 
     # Install packages non-interactively
-    run_noninteractive apt install -y \
+    run_noninteractive apt-get install -y \
         git \
         software-properties-common \
         python-is-python3 \
@@ -174,7 +174,7 @@ install_redis() {
 
     # Add Redis GPG key
     print_info "Adding Redis GPG key..."
-    curl -fsSL https://packages.redis.io/gpg | sudo gpg --dearmor -o /usr/share/keyrings/redis-archive-keyring.gpg
+    curl -fsSL https://packages.redis.io/gpg | sudo gpg --dearmor --batch --yes -o /usr/share/keyrings/redis-archive-keyring.gpg 2>/dev/null
     sudo chmod 644 /usr/share/keyrings/redis-archive-keyring.gpg
 
     # Add Redis repository
@@ -211,7 +211,7 @@ install_wkhtmltopdf() {
 
     # Install dependencies first
     print_info "Installing wkhtmltopdf dependencies..."
-    run_noninteractive apt install -y \
+    run_noninteractive apt-get install -y \
         fontconfig \
         libxext6 \
         libxrender1 \
