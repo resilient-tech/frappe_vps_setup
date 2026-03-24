@@ -167,9 +167,25 @@ configure_python() {
 
 # Function to install Redis
 install_redis() {
-    print_info "Installing Redis server..."
+    print_info "Installing Redis server from the official Redis repository..."
 
-    run_noninteractive apt install -y redis-server
+    # Install prerequisites
+    run_noninteractive apt-get install -y lsb-release curl gpg
+
+    # Add Redis GPG key
+    print_info "Adding Redis GPG key..."
+    curl -fsSL https://packages.redis.io/gpg | sudo gpg --dearmor -o /usr/share/keyrings/redis-archive-keyring.gpg
+    sudo chmod 644 /usr/share/keyrings/redis-archive-keyring.gpg
+
+    # Add Redis repository
+    print_info "Adding Redis APT repository..."
+    echo "deb [signed-by=/usr/share/keyrings/redis-archive-keyring.gpg] https://packages.redis.io/deb $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/redis.list
+
+    # Update package list
+    run_noninteractive apt-get update
+
+    # Install Redis
+    run_noninteractive apt-get install -y redis
 
     # Stop and disable Redis service (Frappe runs its own Redis servers)
     sudo systemctl stop redis-server
@@ -186,7 +202,7 @@ install_redis() {
         exit 1
     fi
 
-    print_success "✓ Redis installed (service disabled for Frappe)"
+    print_success "✓ Redis installed from official repository (service disabled for Frappe)"
 }
 
 # Function to install wkhtmltopdf

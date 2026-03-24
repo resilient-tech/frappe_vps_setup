@@ -65,7 +65,10 @@ load_setup_config() {
     USER_USERNAME="${CONFIG_user_username:-root}"
     FRAPPE_USERNAME="${CONFIG_frappe_username:-resilient}"
     TIMEZONE="${CONFIG_server_timezone:-Asia/Kolkata}"
-    SWAP_SIZE="${CONFIG_server_swap_size:-2G}"
+    SWAP_SIZE="${CONFIG_server_swap_size:-disabled}"
+    USE_ROOT_PASSWORD="${CONFIG_use_root_password_for_initial_setup:-false}"
+    ROOT_PASSWORD="${CONFIG_user_password:-}"
+    LOCAL_SSH_KEY=""
 }
 
 # Function to validate configuration
@@ -86,12 +89,62 @@ validate_config() {
         exit 1
     fi
 
+    # Check password requirements if password mode is enabled
+    if [[ "$USE_ROOT_PASSWORD" == "true" ]]; then
+        print_info "Password-based authentication mode enabled"
+
+        if [[ -z "$ROOT_PASSWORD" ]]; then
+            print_error "ROOT PASSWORD IS MANDATORY when use_root_password_for_initial_setup is true!"
+            print_error "Please set user.password in config.yml"
+            exit 1
+        fi
+
+        # Check for sshpass availability
+        if ! command -v sshpass >/dev/null 2>&1; then
+            print_info "Installing sshpass for password authentication..."
+            if command -v apt-get >/dev/null 2>&1; then
+                sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+            elif command -v yum >/dev/null 2>&1; then
+                sudo yum install -y -q sshpass
+            elif command -v brew >/dev/null 2>&1; then
+                brew install sshpass
+            else
+                print_error "Cannot install sshpass automatically. Please install it manually."
+                exit 1
+            fi
+            print_info "✓ sshpass installed"
+        fi
+
+        # Detect local SSH public key
+        if [[ -f "$HOME/.ssh/id_ed25519.pub" ]]; then
+            LOCAL_SSH_KEY="$HOME/.ssh/id_ed25519.pub"
+            print_info "Found SSH public key: $LOCAL_SSH_KEY"
+        elif [[ -f "$HOME/.ssh/id_rsa.pub" ]]; then
+            LOCAL_SSH_KEY="$HOME/.ssh/id_rsa.pub"
+            print_info "Found SSH public key: $LOCAL_SSH_KEY"
+        else
+            print_error "No SSH public key found!"
+            print_error "Expected to find ~/.ssh/id_ed25519.pub or ~/.ssh/id_rsa.pub"
+            print_error "Please generate an SSH key pair first:"
+            print_error "  ssh-keygen -t ed25519 -C 'your_email@example.com'"
+            exit 1
+        fi
+    fi
+
     print_info "Configuration validated successfully"
     print_info "Server IP: $SERVER_IP"
     print_info "Current Username: $USER_USERNAME"
     print_info "New Frappe Username: $FRAPPE_USERNAME"
     print_info "Timezone: $TIMEZONE"
     print_info "Swap Size: $SWAP_SIZE"
+    if [[ -z "$SWAP_SIZE" || "$SWAP_SIZE" == "disabled" || "$SWAP_SIZE" == "none" ]]; then
+        print_info "Swap setup is disabled. No swap will be configured."
+    fi
+    if [[ "$USE_ROOT_PASSWORD" == "true" ]]; then
+        print_info "Authentication: Password-based (will add SSH keys during setup)"
+    else
+        print_info "Authentication: SSH key-based"
+    fi
 }
 
 # Clean up old SSH host keys for rebuilt servers
@@ -115,13 +168,27 @@ cleanup_known_hosts() {
 test_ssh_connection() {
     print_info "Testing SSH connection to $USER_USERNAME@$SERVER_IP"
 
-    if ! ssh $SSH_OPTS -o BatchMode=yes "$USER_USERNAME@$SERVER_IP" "echo 'SSH connection successful'" 2>/dev/null; then
-        print_error "Failed to connect to $USER_USERNAME@$SERVER_IP"
-        print_error "Please ensure:"
-        print_error "  1. The server is running and accessible"
-        print_error "  2. SSH key authentication is set up"
-        print_error "  3. The IP address and username are correct"
-        exit 1
+    if [[ "$USE_ROOT_PASSWORD" == "true" ]]; then
+        # Use sshpass for password authentication
+        if ! sshpass -p "$ROOT_PASSWORD" ssh $SSH_OPTS -o BatchMode=no "$USER_USERNAME@$SERVER_IP" "echo 'SSH connection successful'" 2>/dev/null; then
+            print_error "Failed to connect to $USER_USERNAME@$SERVER_IP using password"
+            print_error "Please ensure:"
+            print_error "  1. The server is running and accessible"
+            print_error "  2. The password in config.yml is correct"
+            print_error "  3. The IP address and username are correct"
+            print_error "  4. Password authentication is enabled on the server"
+            exit 1
+        fi
+    else
+        # Use SSH key authentication
+        if ! ssh $SSH_OPTS -o BatchMode=yes "$USER_USERNAME@$SERVER_IP" "echo 'SSH connection successful'" 2>/dev/null; then
+            print_error "Failed to connect to $USER_USERNAME@$SERVER_IP"
+            print_error "Please ensure:"
+            print_error "  1. The server is running and accessible"
+            print_error "  2. SSH key authentication is set up"
+            print_error "  3. The IP address and username are correct"
+            exit 1
+        fi
     fi
 
     print_info "SSH connection successful!"
@@ -131,6 +198,30 @@ test_ssh_connection() {
 setup_server() {
     print_info "Performing server setup (user creation, sudo, SSH keys, timezone, swap, SSH hardening)"
 
+    # Read local SSH public key content if using password mode
+    local ssh_pub_key_content=""
+    if [[ "$USE_ROOT_PASSWORD" == "true" ]]; then
+        ssh_pub_key_content=$(cat "$LOCAL_SSH_KEY")
+
+        # First, add SSH key to root's authorized_keys so subsequent connections can use keys
+        print_info "Adding SSH public key to root's authorized_keys..."
+        sshpass -p "$ROOT_PASSWORD" ssh $SSH_OPTS -o BatchMode=no "$USER_USERNAME@$SERVER_IP" /bin/bash << EOF
+set -euo pipefail
+mkdir -p ~/.ssh
+chmod 700 ~/.ssh
+touch ~/.ssh/authorized_keys
+chmod 600 ~/.ssh/authorized_keys
+# Add the key if it doesn't already exist
+if ! grep -qF "$ssh_pub_key_content" ~/.ssh/authorized_keys 2>/dev/null; then
+    echo "$ssh_pub_key_content" >> ~/.ssh/authorized_keys
+    echo "✓ SSH public key added to root's authorized_keys"
+else
+    echo "✓ SSH public key already exists in root's authorized_keys"
+fi
+EOF
+    fi
+
+    # Now execute the main setup script (can use SSH keys after the previous step)
     ssh $SSH_OPTS "$USER_USERNAME@$SERVER_IP" /bin/bash << EOF
 set -euo pipefail
 
@@ -146,9 +237,11 @@ sudo usermod -aG sudo "$FRAPPE_USERNAME"
 echo "$FRAPPE_USERNAME ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/$FRAPPE_USERNAME
 sudo chmod 0440 /etc/sudoers.d/$FRAPPE_USERNAME
 
-echo "=== Copying SSH keys ==="
+echo "=== Setting up SSH keys ==="
 sudo mkdir -p /home/$FRAPPE_USERNAME/.ssh
 sudo cp ~/.ssh/authorized_keys /home/$FRAPPE_USERNAME/.ssh/authorized_keys
+echo "✓ SSH keys copied from root to $FRAPPE_USERNAME"
+
 sudo chown -R $FRAPPE_USERNAME:$FRAPPE_USERNAME /home/$FRAPPE_USERNAME/.ssh
 sudo chmod 700 /home/$FRAPPE_USERNAME/.ssh
 sudo chmod 600 /home/$FRAPPE_USERNAME/.ssh/authorized_keys
@@ -170,95 +263,85 @@ fi
 echo "Current system time:"
 timedatectl status
 
-echo "=== Configuring swap space ==="
-# Check if swap already exists
-if swapon --show | grep -q '/swapfile'; then
-    echo "Swap file already exists, checking size..."
-    current_size=\$(swapon --show --noheadings | grep '/swapfile' | awk '{print \$3}')
-    echo "Current swap size: \$current_size"
-    if [[ "\$current_size" == "$SWAP_SIZE" ]]; then
-        echo "Swap size matches configured size ($SWAP_SIZE), skipping swap setup"
+
+if [[ -n "$SWAP_SIZE" && "$SWAP_SIZE" != "disabled" && "$SWAP_SIZE" != "none" ]]; then
+    echo "=== Configuring swap space ==="
+    # Check if swap already exists
+    if swapon --show | grep -q '/swapfile'; then
+        echo "Swap file already exists, checking size..."
+        current_size=\$(swapon --show --noheadings | grep '/swapfile' | awk '{print \$3}')
+        echo "Current swap size: \$current_size"
+        if [[ "\$current_size" == "$SWAP_SIZE" ]]; then
+            echo "Swap size matches configured size ($SWAP_SIZE), skipping swap setup"
+        else
+            echo "Swap size differs from configured size ($SWAP_SIZE), recreating..."
+            sudo swapoff /swapfile
+            sudo rm -f /swapfile
+            sudo fallocate -l $SWAP_SIZE /swapfile
+            sudo chmod 600 /swapfile
+            sudo mkswap /swapfile
+            sudo swapon /swapfile
+            echo "Swap recreated with size $SWAP_SIZE"
+        fi
     else
-        echo "Swap size differs from configured size ($SWAP_SIZE), recreating..."
-        sudo swapoff /swapfile
-        sudo rm -f /swapfile
+        echo "Creating swap file with size $SWAP_SIZE"
         sudo fallocate -l $SWAP_SIZE /swapfile
         sudo chmod 600 /swapfile
         sudo mkswap /swapfile
         sudo swapon /swapfile
-        echo "Swap recreated with size $SWAP_SIZE"
+        if ! grep -q '/swapfile' /etc/fstab; then
+            echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+        fi
+        echo "Swap file created and enabled"
     fi
-else
-    echo "Creating swap file with size $SWAP_SIZE"
-    # Use fallocate for better performance on modern systems
-    sudo fallocate -l $SWAP_SIZE /swapfile
-    sudo chmod 600 /swapfile
-    sudo mkswap /swapfile
-    sudo swapon /swapfile
 
-    # Make swap permanent by adding to /etc/fstab
-    if ! grep -q '/swapfile' /etc/fstab; then
-        echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
-    fi
-    echo "Swap file created and enabled"
-fi
-
-# Verify swap configuration
-echo "=== Verifying swap configuration ==="
-if swapon --show | grep -q '/swapfile'; then
-    echo "✓ Swap file is active"
-    actual_size=\$(swapon --show --noheadings | grep '/swapfile' | awk '{print \$3}')
-    echo "✓ Active swap size: \$actual_size"
-
-    # Verify fstab entry exists
-    if grep -q '/swapfile.*swap' /etc/fstab; then
-        echo "✓ Swap entry found in /etc/fstab (will persist after reboot)"
+    # Verify swap configuration
+    echo "=== Verifying swap configuration ==="
+    if swapon --show | grep -q '/swapfile'; then
+        echo "✓ Swap file is active"
+        actual_size=\$(swapon --show --noheadings | grep '/swapfile' | awk '{print \$3}')
+        echo "✓ Active swap size: \$actual_size"
+        if grep -q '/swapfile.*swap' /etc/fstab; then
+            echo "✓ Swap entry found in /etc/fstab (will persist after reboot)"
+        else
+            echo "⚠ WARNING: Swap not found in /etc/fstab"
+        fi
+        echo "Memory and swap summary:"
+        free -h
     else
-        echo "⚠ WARNING: Swap not found in /etc/fstab"
+        echo "❌ ERROR: Swap file is not active!"
+        echo "Troubleshooting info:"
+        swapon --show
+        ls -la /swapfile 2>/dev/null || echo "Swap file does not exist"
     fi
 
-    # Show memory info
-    echo "Memory and swap summary:"
-    free -h
+
 else
-    echo "❌ ERROR: Swap file is not active!"
-    echo "Troubleshooting info:"
-    swapon --show
-    ls -la /swapfile 2>/dev/null || echo "Swap file does not exist"
+    echo "Swap setup is disabled. Skipping swap configuration."
 fi
 
-echo "=== Configuring swap properties ==="
-# Configure swappiness and cache pressure for better performance
+# Always tune sysctl for MariaDB
+echo "=== Tuning system parameters for MariaDB (swappiness, vfs_cache_pressure) ==="
 echo "Setting vm.swappiness = 1 and vm.vfs_cache_pressure = 50"
-
-# Add or update swappiness setting
 if grep -q "^vm.swappiness" /etc/sysctl.conf; then
     sudo sed -i 's/^vm.swappiness.*/vm.swappiness = 1/' /etc/sysctl.conf
 else
     echo 'vm.swappiness = 1' | sudo tee -a /etc/sysctl.conf
 fi
-
-# Add or update vfs_cache_pressure setting
 if grep -q "^vm.vfs_cache_pressure" /etc/sysctl.conf; then
     sudo sed -i 's/^vm.vfs_cache_pressure.*/vm.vfs_cache_pressure = 50/' /etc/sysctl.conf
 else
     echo 'vm.vfs_cache_pressure = 50' | sudo tee -a /etc/sysctl.conf
 fi
-
-# Apply the changes immediately
 sudo sysctl -p
-
-# Verify the changes
-echo "=== Verifying swap properties ==="
+echo "=== Verifying system parameters ==="
 current_swappiness=\$(sysctl -n vm.swappiness)
 current_cache_pressure=\$(sysctl -n vm.vfs_cache_pressure)
-
 if [[ "\$current_swappiness" == "1" ]]; then
     echo "✓ vm.swappiness correctly set to \$current_swappiness"
 else
     echo "⚠ WARNING: Expected swappiness 1 but got \$current_swappiness"
 fi
-
 if [[ "\$current_cache_pressure" == "50" ]]; then
     echo "✓ vm.vfs_cache_pressure correctly set to \$current_cache_pressure"
 else
@@ -319,7 +402,11 @@ test_new_ssh_connection() {
         print_info "✅ Setup Summary:"
         print_info "  - User '$FRAPPE_USERNAME' created with sudo privileges"
         print_info "  - Timezone configured to $TIMEZONE"
-        print_info "  - Swap space configured to $SWAP_SIZE with optimized settings"
+        if [[ -n "$SWAP_SIZE" && "$SWAP_SIZE" != "disabled" && "$SWAP_SIZE" != "none" ]]; then
+            print_info "  - Swap space configured to $SWAP_SIZE with optimized settings"
+        else
+            print_info "  - Swap setup disabled"
+        fi
         print_info "  - SSH port changed from 22 to 8520"
         print_info "  - Root login disabled"
         print_info "  - Password authentication disabled"
@@ -363,7 +450,11 @@ main() {
     print_info "✅ Completed steps:"
     print_info "  ✓ Created user '$FRAPPE_USERNAME' with sudo privileges"
     print_info "  ✓ Configured timezone to $TIMEZONE"
-    print_info "  ✓ Configured swap space to $SWAP_SIZE with optimized properties"
+    if [[ -n "$SWAP_SIZE" && "$SWAP_SIZE" != "disabled" && "$SWAP_SIZE" != "none" ]]; then
+        print_info "  ✓ Configured swap space to $SWAP_SIZE with optimized properties"
+    else
+        print_info "  ✓ Swap setup disabled"
+    fi
     print_info "  ✓ Copied SSH keys for key-based authentication"
     print_info "  ✓ Hardened SSH configuration (port 8520, no root/password login)"
     print_info "  ✓ Restarted SSH services and verified new port"
