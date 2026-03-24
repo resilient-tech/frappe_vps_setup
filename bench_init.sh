@@ -235,9 +235,10 @@ stop_bench() {
 get_erpnext_app() {
     if [[ "$INSTALL_ERPNEXT" == "true" ]]; then
         print_info "Getting ERPNext application..."
-        print_info "Running: bench get-app --resolve-deps erpnext"
+        print_info "Branch: $FRAPPE_VERSION (matching Frappe version)"
+        print_info "Running: bench get-app --branch $FRAPPE_VERSION --resolve-deps erpnext"
 
-        if bench get-app --resolve-deps erpnext; then
+        if bench get-app --branch "$FRAPPE_VERSION" --resolve-deps erpnext; then
             print_success "✓ ERPNext app downloaded successfully"
         else
             print_error "❌ Failed to get ERPNext app"
